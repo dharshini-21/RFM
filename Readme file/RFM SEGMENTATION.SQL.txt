@@ -1,0 +1,78 @@
+with 
+duration as 
+(SELECT *
+  FROM bigquery-public-data.thelook_ecommerce.order_items
+  where date(created_at) between "2023-06-01"and "2023-12-30"),
+
+total_spend as 
+(select sum(sale_price) as total_AMOUNT,user_id  
+from duration
+group by 2),
+
+monetary as  (select user_id,total_amount,
+CASE 
+when total_amount between 0 and 300 then "4"
+when total_amount between 300 and 600 then "3"
+when total_amount between 600 and 900 then "2"
+when total_amount >900 then "1"
+END as MT
+from total_spend),
+
+num_of_orders as (select user_id,count(order_id) as count_of_orders
+from duration
+group by 1),
+frequency as
+(select user_id,count_of_orders,
+case 
+when count_of_orders between 0 and 2 then "4"
+when count_of_orders between 2 and 4 then "3"
+when count_of_orders between 4 and 6 then "2"
+when count_of_orders > 6 then "1"
+END AS FT
+FROM num_of_orders),
+ 
+date_difference as(
+SELECT user_id, date_DIFF(DATE('2024-01-01'),max(DATE(created_at)),day) as days
+from duration
+group by user_id
+),
+Recency as(select user_id,days,
+case 
+when days between 0 and 55 then "1"
+when days between 55 and 110 then "2"
+when days between 110 and 165 then "3"
+when days > 165  then "4"
+END AS RT
+from date_difference
+),
+Customer_tier as
+(select R.user_id,R.RT,m.MT,f.FT
+from Recency as R
+join frequency f on R.user_id = f.user_id
+join monetary m on R.user_id = m.user_id
+),
+CUSTOMER_CAT AS(select user_id,RT,MT,FT,
+case 
+when RT = "1"AND FT ="1" AND MT = "1" THEN "BEST CUSTOMERS"
+WHEN RT = "1" AND MT = "4" AND FT = "2" 
+OR
+RT = "1" AND MT = "4" AND FT = "1"THEN "HIGH SPENDING NEW CUSTOMERS"
+WHEN RT = "1" AND MT = "4" AND FT = "1" 
+OR
+RT = "1" AND MT = "3" AND FT = "1"THEN "Lowest-Spending Active Loyal Customers"
+WHEN RT = "4" AND MT = "1" AND FT = "1" 
+OR
+RT = "4" AND MT = "1" AND FT = "2" OR
+RT = "4" AND MT = "2" AND FT = "2" OR 
+RT = "4" AND MT = "2" AND FT = "1" THEN "Churned Best Customers"
+
+END AS CUSTOMER_CATEGORY
+from Customer_tier),
+
+filtered_customer_data as (SELECT * 
+FROM CUSTOMER_CAT
+WHERE CUSTOMER_CATEGORY IS NOT NULL)
+select filtered_customer_data.user_id,filtered_customer_data.CUSTOMER_CATEGORY,users.first_name,users.last_name,users.email,users.street_address,users.postal_code
+FROM filtered_customer_data
+INNER JOIN bigquery-public-data.thelook_ecommerce.users
+ON filtered_customer_data.user_id = users.id
